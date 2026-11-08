@@ -1,0 +1,15 @@
+# Example manifest of a capability package (hobnix/server docs/adr/0009 and 0017). Copy it to capabilities/<name>/package.toml.
+# This folder is not a package: it is not in index.toml and is never installed.
+name = "example"                 # equals the folder name
+version = "0.1.0"                # semver; index.toml must agree
+kind = "capability"
+title = "An example capability"
+title_de = "Eine Beispiel-Fähigkeit"
+requires_core = ">=1"            # API level of the core helpers
+requires = []                    # other capabilities by name, never variants
+provides = []
+needs = []
+implied_by = []
+core = false                     # true: the core refuses to run without it
+# module = "module.nix"          # optional Nix module; default-repository packages only; must evaluate purely
+# options = "options.toml"       # optional settings, validated against the core schema on the machine

@@ -1,0 +1,21 @@
+name: check
+on: [push, pull_request]
+env:
+  # the core checkout the packages are validated against
+  CORE_REPOSITORY: hobnix/server
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ env.CORE_REPOSITORY }}
+          ref: develop
+          path: core
+      - name: index.toml parses
+        run: python3 -I -c 'import tomllib,sys; tomllib.load(open("index.toml","rb"))'
+      # Skeleton: once the core's pkg.py knows kind = "capability" (hobnix/server ADR 0017, phase 1), add here:
+      #   pkg.py validate, pkg.py repo-check ., the tests (HS_CORE="$PWD/core" bash tests/run-all.sh) and the nix matrix.
+      - name: Tests (none yet)
+        run: HS_CORE="$PWD/core" HS_TEST_CI=1 bash tests/run-all.sh
