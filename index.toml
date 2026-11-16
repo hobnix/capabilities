@@ -1,0 +1,9 @@
+# The index of this repository (hobnix/server docs/adr/0017). `hs pkg` reads it at a signed release tag; the version of each entry must equal
+# the package.toml of its folder. No capability has moved here yet.
+#
+# [package.<name>]
+# version = "1.0.0"
+# kind = "capability"
+# path = "capabilities/<name>"
+# title = "..."
+# requires_core = ">=1"
