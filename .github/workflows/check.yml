@@ -125,30 +125,41 @@ jobs:
           repository: ${{ env.CORE_REPOSITORY }}
           ref: ${{ matrix.core_ref }}
           path: core
-      - name: Log the core commit and read its nixpkgs pin
+      - name: Does this core ref have the --vendor matrix?
+        id: core_ok
         if: steps.want.outputs.run == 'true'
+        run: |
+          if [ -f core/scripts/dev/nixpkgs-pin.sh ] && grep -q -- '--vendor' core/scripts/dev/nix-matrix.sh 2>/dev/null; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Nix matrix skipped::core ref ${{ matrix.core_ref }} has no nixpkgs-pin.sh / nix-matrix.sh --vendor yet (they reach develop with the 0.5 milestone). Not a pass: nothing was evaluated."
+            echo "### Nix matrix SKIPPED for core ${{ matrix.core_ref }}: the core ref lacks the --vendor matrix" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Log the core commit and read its nixpkgs pin
+        if: steps.core_ok.outputs.run == 'true'
         working-directory: core
         run: |
           echo "core $CORE_REPOSITORY@${{ matrix.core_ref }} $(git rev-parse HEAD)"
           bash scripts/dev/nixpkgs-pin.sh github-env >> "$GITHUB_ENV"
       - uses: actions/cache@v4
-        if: steps.want.outputs.run == 'true'
+        if: steps.core_ok.outputs.run == 'true'
         with:
           path: ~/nixpkgs.tar.gz
           key: nixpkgs-${{ env.NIXPKGS_REV }}
       - name: Unpack the pinned nixpkgs
-        if: steps.want.outputs.run == 'true'
+        if: steps.core_ok.outputs.run == 'true'
         run: |
           [ -s ~/nixpkgs.tar.gz ] || curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 -o ~/nixpkgs.tar.gz "https://github.com/NixOS/nixpkgs/archive/$NIXPKGS_REV.tar.gz"
           mkdir -p "$RUNNER_TEMP/nixpkgs"
           tar -xzf ~/nixpkgs.tar.gz -C "$RUNNER_TEMP/nixpkgs" --strip-components=1
           echo "NIXPKGS_DIR=$RUNNER_TEMP/nixpkgs" >> "$GITHUB_ENV"
       - uses: cachix/install-nix-action@v27
-        if: steps.want.outputs.run == 'true'
+        if: steps.core_ok.outputs.run == 'true'
         with:
           nix_path: nixpkgs=${{ env.NIXPKGS_DIR }}
       - name: Capability matrix with this repository vendored (--vendor)
-        if: steps.want.outputs.run == 'true'
+        if: steps.core_ok.outputs.run == 'true'
         working-directory: core
         run: |
           rm -f machine.toml hardware-configuration.nix
