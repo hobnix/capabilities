@@ -7,25 +7,62 @@ env:
   # the core checkout the packages are validated against (change it when the core lives elsewhere)
   CORE_REPOSITORY: hobnix/server
 jobs:
-  check:
+  # Which refs of the core this run is checked against (docs/PLAN-capabilities-repo.md of hobnix/server, Q5 and decision O11). An ordinary
+  # pull request or push: the branch of the same name if the core has one, else `develop`. A release pull request (into main) and a v* tag:
+  # the core's newest stable tag AND `develop`, so a capabilities release is tested against what stable servers run and what is coming.
+  refs:
     runs-on: ubuntu-latest
+    outputs:
+      refs: ${{ steps.r.outputs.refs }}
+      release: ${{ steps.r.outputs.release }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Pick the core ref (branch of the same name, else develop)
-        id: core
+      - id: r
         env:
           GH_REF: ${{ github.head_ref || github.ref_name }}
+          RELEASE: ${{ github.base_ref == 'main' || startsWith(github.ref, 'refs/tags/') }}
         run: |
-          ref=develop
-          if git ls-remote --exit-code --heads "https://github.com/$CORE_REPOSITORY.git" "$GH_REF" >/dev/null 2>&1; then ref=$GH_REF; fi
-          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          url=https://github.com/$CORE_REPOSITORY.git
+          if [ "$RELEASE" = true ]; then
+            tag=$(git ls-remote --tags --refs "$url" 'v*' | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+[.][0-9]+[.][0-9]+$' | sort -V | tail -n 1)
+            if [ -n "$tag" ]; then refs="[\"$tag\",\"develop\"]"; else refs='["develop"]'; fi
+          elif git ls-remote --exit-code --heads "$url" "$GH_REF" >/dev/null 2>&1; then
+            refs="[\"$GH_REF\"]"
+          else
+            refs='["develop"]'
+          fi
+          echo "refs=$refs" >> "$GITHUB_OUTPUT"
+          echo "release=$RELEASE" >> "$GITHUB_OUTPUT"
+          echo "core refs: $refs"
+
+  # A pull request carries at most one bump label (hobnix/server#615).
+  labels:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: At most one bump label
+        env:
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |
+          n=$(printf '%s' "$LABELS" | tr ',' '\n' | grep -c '^bump: ' || true)
+          echo "labels: ${LABELS:-none}"
+          [ "$n" -le 1 ] || { echo "::error::more than one bump label: keep one of 'bump: minor' or 'bump: major' (none = patch)"; exit 1; }
+
+  check:
+    needs: refs
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        core_ref: ${{ fromJSON(needs.refs.outputs.refs) }}
+    steps:
+      - uses: actions/checkout@v4
       - uses: actions/checkout@v4
         with:
           repository: ${{ env.CORE_REPOSITORY }}
-          ref: ${{ steps.core.outputs.ref }}
+          ref: ${{ matrix.core_ref }}
           path: core
       - name: Log the core commit
-        run: echo "core $CORE_REPOSITORY@${{ steps.core.outputs.ref }} $(git -C core rev-parse HEAD)"
+        run: echo "core $CORE_REPOSITORY@${{ matrix.core_ref }} $(git -C core rev-parse HEAD)"
       - name: Does the core know kind = "capability"?
         id: kind
         run: |
@@ -54,3 +91,78 @@ jobs:
         run: for f in capabilities/*/*.sh tests/*.sh; do [ -f "$f" ] && bash -n "$f"; done; true
       - name: Tests (against the core checked out above)
         run: HS_CORE="$PWD/core" HS_TEST_CI=1 bash tests/run-all.sh
+
+  # The Nix side (Q5, decision O9): every package with a module.nix is vendored into a copy of the core the way `hs pkg install` does it, and
+  # the core's matrix evaluates each alone, all of them and none (`nix-matrix.sh --vendor`, no --impure). It runs when a module, package.toml,
+  # options.toml or this file changed, and always for a release pull request and a tag. Nix is not available where this file was written:
+  # not run yet.
+  nix:
+    needs: [refs, check]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        core_ref: ${{ fromJSON(needs.refs.outputs.refs) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Does the Nix matrix have to run?
+        id: want
+        env:
+          RELEASE: ${{ needs.refs.outputs.release }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          want=true
+          if [ "$RELEASE" != true ] && [ -n "$BASE" ] && git cat-file -e "$BASE" 2>/dev/null; then
+            git diff --name-only "$BASE" HEAD | grep -qE '^capabilities/[^/]+/([^/]+\.nix|package\.toml|options\.toml)$|^\.github/workflows/check\.yml$' || want=false
+          fi
+          echo "run=$want" >> "$GITHUB_OUTPUT"
+          echo "nix matrix: $want"
+      - uses: actions/checkout@v4
+        if: steps.want.outputs.run == 'true'
+        with:
+          repository: ${{ env.CORE_REPOSITORY }}
+          ref: ${{ matrix.core_ref }}
+          path: core
+      - name: Log the core commit and read its nixpkgs pin
+        if: steps.want.outputs.run == 'true'
+        working-directory: core
+        run: |
+          echo "core $CORE_REPOSITORY@${{ matrix.core_ref }} $(git rev-parse HEAD)"
+          bash scripts/dev/nixpkgs-pin.sh github-env >> "$GITHUB_ENV"
+      - uses: actions/cache@v4
+        if: steps.want.outputs.run == 'true'
+        with:
+          path: ~/nixpkgs.tar.gz
+          key: nixpkgs-${{ env.NIXPKGS_REV }}
+      - name: Unpack the pinned nixpkgs
+        if: steps.want.outputs.run == 'true'
+        run: |
+          [ -s ~/nixpkgs.tar.gz ] || curl -fsSL --retry 5 --retry-all-errors --retry-delay 10 -o ~/nixpkgs.tar.gz "https://github.com/NixOS/nixpkgs/archive/$NIXPKGS_REV.tar.gz"
+          mkdir -p "$RUNNER_TEMP/nixpkgs"
+          tar -xzf ~/nixpkgs.tar.gz -C "$RUNNER_TEMP/nixpkgs" --strip-components=1
+          echo "NIXPKGS_DIR=$RUNNER_TEMP/nixpkgs" >> "$GITHUB_ENV"
+      - uses: cachix/install-nix-action@v27
+        if: steps.want.outputs.run == 'true'
+        with:
+          nix_path: nixpkgs=${{ env.NIXPKGS_DIR }}
+      - name: Capability matrix with this repository vendored (--vendor)
+        if: steps.want.outputs.run == 'true'
+        working-directory: core
+        run: |
+          rm -f machine.toml hardware-configuration.nix
+          bash scripts/dev/nix-matrix.sh --vendor "$GITHUB_WORKSPACE"
+
+  # The one result a branch rule can ask for. A job that did not have to run counts as fine.
+  check-ok:
+    if: always()
+    needs: [refs, labels, check, nix]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job passed or was skipped
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          case " $RESULTS " in *" failure "*|*" cancelled "*) exit 1 ;; esac
