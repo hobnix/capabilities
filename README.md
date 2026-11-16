@@ -4,7 +4,8 @@ Optional capabilities for [Hobnix](https://github.com/hobnix/server), the NixOS 
 `kind = "capability"`: a manifest (`package.toml`), optionally a Nix module, commands, options and a web page. The setup wizard of the
 core installs the ones you pick; `hs pkg` fetches them at a signed release tag and verifies the signature.
 
-**Status: scaffold.** No capability lives here yet. This repository is the pilot target of hobnix/server#225; the design is
+**Status: scaffold.** No capability lives here yet; the first one will be `testlab` (pilot, hobnix/server#225, plan decision O1). This
+repository joins the core's list of default repositories (`config/package-repos.toml`) only after its first signed tag. The design is
 [ADR 0017](https://github.com/hobnix/server/blob/develop/docs/adr/0017-capabilities-repository-and-channels.md) (Proposed) and builds on ADR 0008 and 0009.
 
 ## Layout
