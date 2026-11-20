@@ -167,6 +167,8 @@ jobs:
 
   # The one result a branch rule can ask for. A job that did not have to run counts as fine.
   check-ok:
+    # the context branch protection requires on develop and main ("check"): one result for the whole run
+    name: check
     if: always()
     needs: [refs, labels, check, nix]
     runs-on: ubuntu-latest
