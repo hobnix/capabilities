@@ -1,3 +1,7 @@
+<p align="center"><img src="https://raw.githubusercontent.com/hobnix/core/HEAD/.github/branding/banner@2x.webp" alt="hobnix" width="100%"></p>
+
+> **Retired.** Development moved to [hobnix/official](https://github.com/hobnix/official). A server on core 0.13 or later moves over by itself (`hs pkg repo migrate`, also run by `hs update`); a server on core 0.12 still reads this repository until it updates.
+
 # hobnix/capabilities
 
 Optional capabilities for [Hobnix](https://github.com/hobnix/server), the NixOS home server. A capability is a package with
